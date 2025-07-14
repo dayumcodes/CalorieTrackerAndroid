@@ -2,7 +2,7 @@
   "expo": {
     "name": "Calorie Tracker",
     "slug": "calorie-tracker",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/images/adaptive-icon.png",
     "scheme": "calorietracker",
@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.calorietracker.app",
-      "versionCode": 8,
+      "versionCode": 9,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
