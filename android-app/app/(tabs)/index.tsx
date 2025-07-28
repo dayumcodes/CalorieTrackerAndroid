@@ -6,6 +6,7 @@ import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useInAppReview } from '../../hooks/useInAppReview';
+import { ReviewTrigger, UserAction } from '../../lib/types/review-types';
 
 // You'll need to replace this with your actual hosted Next.js app URL
 // For development, you can use your local network IP address and port
@@ -30,37 +31,51 @@ export default function HomeScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const webViewRef = useRef<WebView>(null);
   const insets = useSafeAreaInsets();
-  const { triggerReview } = useInAppReview();
+  const { triggerReview, recordUserAction } = useInAppReview();
 
   // Track app opens and potentially show review prompt
   useEffect(() => {
     const trackAppOpenAndReview = async () => {
       try {
-        // Get current open count
-        const countStr = await AsyncStorage.getItem(APP_OPEN_COUNT_KEY);
-        const currentCount = countStr ? parseInt(countStr, 10) : 0;
-        const newCount = currentCount + 1;
-        
-        // Save the new count
-        await AsyncStorage.setItem(APP_OPEN_COUNT_KEY, newCount.toString());
-        
-        // Check if we should show the review prompt
-        // Only show after a certain number of opens and not on first launch
-        if (newCount >= 5 && newCount % 10 === 0) {
-          // Wait a bit for the app to load before showing the review prompt
-          setTimeout(() => {
-            triggerReview({
-              minimumAppOpens: 5
-            });
-          }, 3000);
-        }
+        // Record app open action for review system
+        recordUserAction({
+          type: 'app_open',
+          timestamp: new Date(),
+          metadata: {
+            screen: 'home',
+            source: 'app_launch'
+          }
+        });
+
+        // Trigger review with proper context after app loads
+        setTimeout(() => {
+          triggerReview({
+            context: {
+              trigger: ReviewTrigger.APP_OPEN,
+              userState: {
+                appOpenCount: 0, // Will be populated by the hook
+                successfulFoodLogs: 0,
+                streakDays: 0,
+                milestonesAchieved: [],
+                lastReviewPrompt: null,
+                lastReviewAction: null,
+              },
+              appState: {
+                isLoading: false,
+                hasErrors: false,
+                currentScreen: 'home',
+                sessionStartTime: new Date(),
+              }
+            }
+          });
+        }, 3000);
       } catch (error) {
         console.error('Error tracking app opens:', error);
       }
     };
 
     trackAppOpenAndReview();
-  }, [triggerReview]);
+  }, [triggerReview, recordUserAction]);
 
   // Handle back button press for navigation within WebView
   useEffect(() => {
@@ -79,42 +94,162 @@ export default function HomeScreen() {
   const handleWebViewNavigationStateChange = (newNavState: WebViewNavigation) => {
     // Update loading state
     setLoading(newNavState.loading);
-    
+
     // Reset error state when navigation is successful
     if (!newNavState.loading && !newNavState.title?.includes('Error')) {
       setError(false);
       setErrorMessage(null);
     }
-    
-    // Check if user has logged food (this is a heuristic based on URL)
-    // You may need to adjust this based on your actual URL structure
+
+    // Check for successful food logging based on URL patterns
     if (newNavState.url.includes('/log-food') && newNavState.url.includes('success=true')) {
       handleSuccessfulFoodLog();
     }
+
+    // Check for goal completion patterns
+    if (newNavState.url.includes('/goals') && newNavState.url.includes('completed=true')) {
+      handleGoalCompletion();
+    }
+
+    // Check for milestone achievements
+    if (newNavState.url.includes('/achievements') || newNavState.url.includes('milestone=')) {
+      handleMilestoneAchievement(newNavState.url);
+    }
   };
-  
+
   // Track successful food logs and potentially trigger review
   const handleSuccessfulFoodLog = async () => {
     try {
-      // Get the current timestamp
-      const now = Date.now();
-      
-      // Save the last successful log time
-      await AsyncStorage.setItem(LAST_SUCCESSFUL_LOG_KEY, now.toString());
-      
-      // Get log count (we could track this separately if needed)
-      const countStr = await AsyncStorage.getItem(APP_OPEN_COUNT_KEY);
-      const currentCount = countStr ? parseInt(countStr, 10) : 0;
-      
-      // Show review after user has had meaningful interactions
-      // This is a good time to ask for a review - after a successful action
-      if (currentCount >= 8) {
-        setTimeout(() => {
-          triggerReview();
-        }, 1500);
-      }
+      // Record successful food log action
+      recordUserAction({
+        type: 'successful_food_log',
+        timestamp: new Date(),
+        metadata: {
+          screen: 'home',
+          source: 'food_logging'
+        }
+      });
+
+      // Save the last successful log time for legacy compatibility
+      await AsyncStorage.setItem(LAST_SUCCESSFUL_LOG_KEY, Date.now().toString());
+
+      // Trigger review with successful food log context
+      // This is an optimal time to ask for a review - after a successful action
+      setTimeout(() => {
+        triggerReview({
+          context: {
+            trigger: ReviewTrigger.SUCCESSFUL_FOOD_LOG,
+            userState: {
+              appOpenCount: 0, // Will be populated by the hook
+              successfulFoodLogs: 0,
+              streakDays: 0,
+              milestonesAchieved: [],
+              lastReviewPrompt: null,
+              lastReviewAction: null,
+            },
+            appState: {
+              isLoading: false,
+              hasErrors: false,
+              currentScreen: 'home',
+              sessionStartTime: new Date(),
+            }
+          }
+        });
+      }, 1500);
     } catch (error) {
       console.error('Error handling successful food log:', error);
+    }
+  };
+
+  // Handle goal completion events
+  const handleGoalCompletion = async () => {
+    try {
+      // Record goal completion action
+      recordUserAction({
+        type: 'goal_completed',
+        timestamp: new Date(),
+        metadata: {
+          screen: 'home',
+          source: 'goal_tracking'
+        }
+      });
+
+      // Trigger review for goal completion - high confidence trigger
+      setTimeout(() => {
+        triggerReview({
+          context: {
+            trigger: ReviewTrigger.GOAL_COMPLETED,
+            userState: {
+              appOpenCount: 0, // Will be populated by the hook
+              successfulFoodLogs: 0,
+              streakDays: 0,
+              milestonesAchieved: [],
+              lastReviewPrompt: null,
+              lastReviewAction: null,
+            },
+            appState: {
+              isLoading: false,
+              hasErrors: false,
+              currentScreen: 'home',
+              sessionStartTime: new Date(),
+            }
+          }
+        });
+      }, 2000);
+    } catch (error) {
+      console.error('Error handling goal completion:', error);
+    }
+  };
+
+  // Handle milestone achievement events
+  const handleMilestoneAchievement = async (url: string) => {
+    try {
+      // Extract milestone information from URL
+      let milestoneType = 'unknown';
+      if (url.includes('streak')) {
+        milestoneType = 'streak_milestone';
+      } else if (url.includes('goal')) {
+        milestoneType = 'goal_milestone';
+      } else if (url.includes('achievement')) {
+        milestoneType = 'general_achievement';
+      }
+
+      // Record milestone achievement action
+      recordUserAction({
+        type: 'milestone_achieved',
+        timestamp: new Date(),
+        metadata: {
+          screen: 'home',
+          source: 'milestone_tracking',
+          milestoneType,
+          url
+        }
+      });
+
+      // Trigger review for milestone achievement - very high confidence trigger
+      setTimeout(() => {
+        triggerReview({
+          context: {
+            trigger: ReviewTrigger.MILESTONE_ACHIEVED,
+            userState: {
+              appOpenCount: 0, // Will be populated by the hook
+              successfulFoodLogs: 0,
+              streakDays: 0,
+              milestonesAchieved: [milestoneType],
+              lastReviewPrompt: null,
+              lastReviewAction: null,
+            },
+            appState: {
+              isLoading: false,
+              hasErrors: false,
+              currentScreen: 'home',
+              sessionStartTime: new Date(),
+            }
+          }
+        });
+      }, 2500);
+    } catch (error) {
+      console.error('Error handling milestone achievement:', error);
     }
   };
 
@@ -156,7 +291,7 @@ export default function HomeScreen() {
     }
   };
 
-  // Custom JavaScript to inject to handle React Server Component errors
+  // Custom JavaScript to inject to handle React Server Component errors and track user actions
   const injectedJavaScript = `
     window.onerror = function(message, source, lineno, colno, error) {
       if (message && message.includes('Server Components')) {
@@ -185,6 +320,70 @@ export default function HomeScreen() {
         }
       });
     }
+
+    // Track user interactions for review triggers
+    (function() {
+      // Track successful food logging
+      const originalFetch = window.fetch;
+      window.fetch = function(...args) {
+        return originalFetch.apply(this, args).then(response => {
+          if (response.ok && args[0] && args[0].includes('/api/food')) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'user_action',
+              action: 'successful_food_log',
+              timestamp: new Date().toISOString()
+            }));
+          }
+          return response;
+        });
+      };
+
+      // Track goal completions
+      const trackGoalCompletion = () => {
+        if (window.location.href.includes('goal') && window.location.href.includes('complete')) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'user_action',
+            action: 'goal_completed',
+            timestamp: new Date().toISOString()
+          }));
+        }
+      };
+
+      // Track milestone achievements
+      const trackMilestones = () => {
+        const milestoneElements = document.querySelectorAll('[data-milestone], .milestone, .achievement');
+        milestoneElements.forEach(element => {
+          if (element.textContent && element.textContent.includes('achieved')) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'user_action',
+              action: 'milestone_achieved',
+              milestone: element.textContent,
+              timestamp: new Date().toISOString()
+            }));
+          }
+        });
+      };
+
+      // Monitor for changes in the DOM
+      if (window.MutationObserver) {
+        const observer = new MutationObserver(() => {
+          trackGoalCompletion();
+          trackMilestones();
+        });
+        
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true
+        });
+      }
+
+      // Initial check
+      setTimeout(() => {
+        trackGoalCompletion();
+        trackMilestones();
+      }, 1000);
+    })();
+    
     true;
   `;
 
@@ -192,28 +391,125 @@ export default function HomeScreen() {
   const handleMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+
       if (data.type === 'error') {
         console.error('WebView JS error:', data);
         setError(true);
         setErrorMessage(`Error: ${data.message}`);
+      } else if (data.type === 'user_action') {
+        // Handle user actions from the web interface
+        handleWebUserAction(data);
       }
     } catch (e) {
       console.error('Error parsing WebView message:', e);
     }
   };
 
+  // Handle user actions received from the web interface
+  const handleWebUserAction = (data: any) => {
+    try {
+      const action: UserAction = {
+        type: data.action,
+        timestamp: new Date(data.timestamp),
+        metadata: {
+          source: 'web_interface',
+          ...data
+        }
+      };
+
+      recordUserAction(action);
+
+      // Trigger appropriate review based on action type
+      switch (data.action) {
+        case 'successful_food_log':
+          setTimeout(() => {
+            triggerReview({
+              context: {
+                trigger: ReviewTrigger.SUCCESSFUL_FOOD_LOG,
+                userState: {
+                  appOpenCount: 0,
+                  successfulFoodLogs: 0,
+                  streakDays: 0,
+                  milestonesAchieved: [],
+                  lastReviewPrompt: null,
+                  lastReviewAction: null,
+                },
+                appState: {
+                  isLoading: false,
+                  hasErrors: false,
+                  currentScreen: 'home',
+                  sessionStartTime: new Date(),
+                }
+              }
+            });
+          }, 1500);
+          break;
+
+        case 'goal_completed':
+          setTimeout(() => {
+            triggerReview({
+              context: {
+                trigger: ReviewTrigger.GOAL_COMPLETED,
+                userState: {
+                  appOpenCount: 0,
+                  successfulFoodLogs: 0,
+                  streakDays: 0,
+                  milestonesAchieved: [],
+                  lastReviewPrompt: null,
+                  lastReviewAction: null,
+                },
+                appState: {
+                  isLoading: false,
+                  hasErrors: false,
+                  currentScreen: 'home',
+                  sessionStartTime: new Date(),
+                }
+              }
+            });
+          }, 2000);
+          break;
+
+        case 'milestone_achieved':
+          setTimeout(() => {
+            triggerReview({
+              context: {
+                trigger: ReviewTrigger.MILESTONE_ACHIEVED,
+                userState: {
+                  appOpenCount: 0,
+                  successfulFoodLogs: 0,
+                  streakDays: 0,
+                  milestonesAchieved: [data.milestone || 'web_milestone'],
+                  lastReviewPrompt: null,
+                  lastReviewAction: null,
+                },
+                appState: {
+                  isLoading: false,
+                  hasErrors: false,
+                  currentScreen: 'home',
+                  sessionStartTime: new Date(),
+                }
+              }
+            });
+          }, 2500);
+          break;
+      }
+    } catch (error) {
+      console.error('Error handling web user action:', error);
+    }
+  };
+
   return (
-    <View 
+    <View
       style={[
-        styles.container, 
-        { 
+        styles.container,
+        {
           paddingTop: statusBarHeight,
           paddingBottom: insets.bottom || 10 // Use insets if available, otherwise use a small default
         }
       ]}
     >
       <StatusBar style="auto" />
-      
+
       <WebView
         ref={webViewRef}
         source={{ uri: APP_URL }}
@@ -242,7 +538,7 @@ export default function HomeScreen() {
           <Text style={styles.errorText}>
             {errorMessage || 'Unable to connect to the Calorie Tracker. Please check your internet connection.'}
           </Text>
-          <Text 
+          <Text
             style={styles.reloadText}
             onPress={reloadWebView}
           >

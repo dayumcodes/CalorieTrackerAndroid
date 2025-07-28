@@ -6,6 +6,7 @@ import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { ReviewTriggerTracker } from '../components/ReviewTriggerTracker';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -20,13 +21,15 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="+not-found" options={{ headerShown: false }} />
-        </Stack>
-        <StatusBar style="auto" />
-      </ThemeProvider>
+      <ReviewTriggerTracker>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="+not-found" options={{ headerShown: false }} />
+          </Stack>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      </ReviewTriggerTracker>
     </SafeAreaProvider>
   );
 }

@@ -1,9 +1,11 @@
 // NOTE: You need to install @react-native-community/datetimepicker for this to work:
 // npm install @react-native-community/datetimepicker
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Button, Switch, StyleSheet, Platform } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useInAppReview } from '../../hooks/useInAppReview';
+import { ReviewTrigger } from '../../lib/types/review-types';
 
 export default function RemindersScreen() {
   const {
@@ -15,11 +17,25 @@ export default function RemindersScreen() {
     error,
   } = useNotifications();
 
+  const { recordUserAction, triggerReview } = useInAppReview();
+
   // Local state for time pickers
   const [logMealsTime, setLogMealsTime] = useState(settings?.logMealsTime || '19:00');
   const [showLogMealsPicker, setShowLogMealsPicker] = useState(false);
   const [drinkWater, setDrinkWater] = useState(settings?.drinkWater || false);
   const [logMeals, setLogMeals] = useState(settings?.logMeals || false);
+
+  // Track reminders screen visit and setup interactions
+  useEffect(() => {
+    recordUserAction({
+      type: 'reminders_screen_visit',
+      timestamp: new Date(),
+      metadata: {
+        screen: 'reminders',
+        source: 'tab_navigation'
+      }
+    });
+  }, [recordUserAction]);
 
   // Parse time string to Date
   const parseTime = (time: string) => {
@@ -44,6 +60,19 @@ export default function RemindersScreen() {
 
   // Save settings
   const handleSave = () => {
+    // Record reminder setup action
+    recordUserAction({
+      type: 'reminders_configured',
+      timestamp: new Date(),
+      metadata: {
+        screen: 'reminders',
+        logMeals,
+        drinkWater,
+        logMealsTime,
+        source: 'settings_save'
+      }
+    });
+
     saveSettings({
       logMeals,
       logMealsTime,
@@ -53,6 +82,45 @@ export default function RemindersScreen() {
       weighInDay: settings?.weighInDay || 'monday',
       weighInTime: settings?.weighInTime || '08:00',
     });
+
+    // Setting up reminders indicates user commitment - good time for review
+    if (logMeals || drinkWater) {
+      setTimeout(() => {
+        triggerReview({
+          context: {
+            trigger: ReviewTrigger.MILESTONE_ACHIEVED,
+            userState: {
+              appOpenCount: 0,
+              successfulFoodLogs: 0,
+              streakDays: 0,
+              milestonesAchieved: ['reminders_setup'],
+              lastReviewPrompt: null,
+              lastReviewAction: null,
+            },
+            appState: {
+              isLoading: false,
+              hasErrors: false,
+              currentScreen: 'reminders',
+              sessionStartTime: new Date(),
+            }
+          }
+        });
+      }, 2000);
+    }
+  };
+
+  // Handle test notification with review trigger
+  const handleTestNotification = () => {
+    recordUserAction({
+      type: 'test_notification',
+      timestamp: new Date(),
+      metadata: {
+        screen: 'reminders',
+        source: 'test_button'
+      }
+    });
+
+    testNotification();
   };
 
   return (
@@ -84,7 +152,7 @@ export default function RemindersScreen() {
         <Switch value={drinkWater} onValueChange={setDrinkWater} />
       </View>
       <Button title="Save Reminders" onPress={handleSave} disabled={loading} />
-      <Button title="Test Notification" onPress={testNotification} />
+      <Button title="Test Notification" onPress={handleTestNotification} />
     </View>
   );
 }

@@ -1,3 +1,4 @@
+import React, { useEffect } from 'react';
 import { Image } from 'expo-image';
 import { Platform, StyleSheet } from 'react-native';
 
@@ -7,8 +8,49 @@ import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { useInAppReview } from '../../hooks/useInAppReview';
+import { ReviewTrigger } from '../../lib/types/review-types';
 
 export default function TabTwoScreen() {
+  const { recordUserAction, triggerReview } = useInAppReview();
+
+  // Track explore screen visits as engagement indicator
+  useEffect(() => {
+    recordUserAction({
+      type: 'explore_screen_visit',
+      timestamp: new Date(),
+      metadata: {
+        screen: 'explore',
+        source: 'tab_navigation'
+      }
+    });
+
+    // After user explores the app features, they might be ready for a review
+    // This indicates they're engaged and learning about the app
+    const exploreTimer = setTimeout(() => {
+      triggerReview({
+        context: {
+          trigger: ReviewTrigger.MILESTONE_ACHIEVED,
+          userState: {
+            appOpenCount: 0,
+            successfulFoodLogs: 0,
+            streakDays: 0,
+            milestonesAchieved: ['app_exploration'],
+            lastReviewPrompt: null,
+            lastReviewAction: null,
+          },
+          appState: {
+            isLoading: false,
+            hasErrors: false,
+            currentScreen: 'explore',
+            sessionStartTime: new Date(),
+          }
+        }
+      });
+    }, 10000); // After 10 seconds of exploring
+
+    return () => clearTimeout(exploreTimer);
+  }, [recordUserAction, triggerReview]);
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
