@@ -86,6 +86,32 @@ describe('Performance Optimizations', () => {
       await expect(preloadPromise).resolves.toBeUndefined();
     });
 
+    it('should support smart preloading based on usage hints', async () => {
+      const lazyLoader = getLazyLoader();
+      
+      // Test smart preloading with different usage patterns
+      await lazyLoader.smartPreload({
+        likelyToTriggerReview: true,
+        frequentStorageAccess: true,
+        analyticsEnabled: true,
+      });
+      
+      // Should have preloaded components based on hints
+      expect(lazyLoader.isComponentLoaded('storageService')).toBe(true);
+      expect(lazyLoader.isComponentLoaded('analyticsTracker')).toBe(true);
+    });
+
+    it('should handle staged preloading for better dependency management', async () => {
+      const lazyLoader = getLazyLoader();
+      
+      const startTime = Date.now();
+      await lazyLoader.preloadComponents();
+      const preloadTime = Date.now() - startTime;
+      
+      // Should complete staged preloading efficiently
+      expect(preloadTime).toBeLessThan(2000);
+    });
+
     it('should provide loading status information', async () => {
       const lazyLoader = getLazyLoader();
       
@@ -187,6 +213,54 @@ describe('Performance Optimizations', () => {
       expect(results.key3).toBe('value3');
     });
 
+    it('should optimize cache with intelligent TTL based on confidence', () => {
+      const cacheManager = getCacheManager();
+      
+      // High confidence result should cache longer
+      const highConfidenceResult = {
+        shouldTrigger: true,
+        confidence: 0.9,
+        reason: 'High confidence',
+      };
+      
+      cacheManager.cacheTriggerEvaluation('app_open', { confidence: 0.9 }, highConfidenceResult);
+      
+      // Low confidence result should cache shorter
+      const lowConfidenceResult = {
+        shouldTrigger: false,
+        confidence: 0.2,
+        reason: 'Low confidence',
+      };
+      
+      cacheManager.cacheTriggerEvaluation('app_open', { confidence: 0.2 }, lowConfidenceResult);
+      
+      // Both should be cached initially
+      const highConfKey = `trigger_eval_app_open_${(cacheManager as any).hashContext({ confidence: 0.9 })}`;
+      const lowConfKey = `trigger_eval_app_open_${(cacheManager as any).hashContext({ confidence: 0.2 })}`;
+      
+      expect(cacheManager.has(highConfKey)).toBe(true);
+      expect(cacheManager.has(lowConfKey)).toBe(true);
+    });
+
+    it('should handle cache eviction with multiple entries efficiently', () => {
+      const cacheManager = getCacheManager({ maxSize: 3 });
+      
+      // Fill cache beyond capacity
+      const entries = [
+        { key: 'key1', data: 'data1' },
+        { key: 'key2', data: 'data2' },
+        { key: 'key3', data: 'data3' },
+        { key: 'key4', data: 'data4' },
+        { key: 'key5', data: 'data5' },
+      ];
+      
+      cacheManager.setBatch(entries);
+      
+      // Should have evicted older entries
+      expect(cacheManager.getStats().evictions).toBeGreaterThan(0);
+      expect(cacheManager.getStats().totalSize).toBe(3);
+    });
+
     it('should evict least recently used entries when full', () => {
       const cacheManager = getCacheManager({ maxSize: 2 });
       
@@ -271,6 +345,49 @@ describe('Performance Optimizations', () => {
       batchProcessor.clearQueue();
       
       expect(batchProcessor.getQueueStatus().queueLength).toBe(0);
+    });
+
+    it('should intelligently merge counter operations', async () => {
+      const batchProcessor = getBatchProcessor();
+      
+      // Mock storage service for testing
+      const mockUpdateMetrics = jest.fn().mockResolvedValue(undefined);
+      jest.doMock('../lib/storage-service', () => ({
+        storageService: { updateUserMetrics: mockUpdateMetrics },
+      }));
+
+      // Add multiple counter updates
+      batchProcessor.batchUpdateUserMetrics({ appOpenCount: 1 });
+      batchProcessor.batchUpdateUserMetrics({ appOpenCount: 2 });
+      batchProcessor.batchUpdateUserMetrics({ successfulFoodLogs: 1 });
+      
+      await batchProcessor.flush();
+      
+      // Should merge counter updates intelligently
+      expect(mockUpdateMetrics).toHaveBeenCalledWith({
+        appOpenCount: 3, // 1 + 2
+        successfulFoodLogs: 1,
+      });
+    });
+
+    it('should handle timestamp conflicts with last-write-wins', async () => {
+      const batchProcessor = getBatchProcessor();
+      
+      const mockUpdateSettings = jest.fn().mockResolvedValue(undefined);
+      jest.doMock('../lib/storage-service', () => ({
+        storageService: { updateReviewSettings: mockUpdateSettings },
+      }));
+
+      // Add settings updates with conflicts
+      batchProcessor.batchUpdateReviewSettings({ minimumAppOpens: 5 });
+      batchProcessor.batchUpdateReviewSettings({ minimumAppOpens: 10 });
+      
+      await batchProcessor.flush();
+      
+      // Should use last-write-wins for conflicts
+      expect(mockUpdateSettings).toHaveBeenCalledWith({
+        minimumAppOpens: 10, // Latest value
+      });
     });
   });
 
@@ -357,19 +474,41 @@ describe('Performance Optimizations', () => {
       
       // Mock process.memoryUsage
       const originalMemoryUsage = process.memoryUsage;
-      process.memoryUsage = jest.fn()
+      const mockMemoryUsage = jest.fn()
+        .mockReturnValue({
+          heapUsed: 1000000,
+          heapTotal: 2000000,
+          external: 100000,
+          rss: 3000000,
+          arrayBuffers: 50000,
+        })
         .mockReturnValueOnce({
           heapUsed: 1000000,
           heapTotal: 2000000,
           external: 100000,
           rss: 3000000,
+          arrayBuffers: 50000,
         })
         .mockReturnValueOnce({
           heapUsed: 1200000, // Increased
           heapTotal: 2000000,
           external: 100000,
           rss: 3000000,
+          arrayBuffers: 50000,
+        })
+        .mockReturnValueOnce({
+          heapUsed: 1200000, // For trend calculation
+          heapTotal: 2000000,
+          external: 100000,
+          rss: 3000000,
+          arrayBuffers: 50000,
         });
+      
+      // Replace the global process.memoryUsage
+      (global as any).process = {
+        ...process,
+        memoryUsage: mockMemoryUsage,
+      };
       
       const snapshot1 = profiler.takeMemorySnapshot();
       const snapshot2 = profiler.takeMemorySnapshot();
@@ -381,7 +520,10 @@ describe('Performance Optimizations', () => {
       expect(trend.trend).toBe('increasing');
       
       // Restore original function
-      process.memoryUsage = originalMemoryUsage;
+      (global as any).process = {
+        ...process,
+        memoryUsage: originalMemoryUsage,
+      };
     });
 
     it('should identify performance bottlenecks', async () => {
@@ -434,6 +576,71 @@ describe('Performance Optimizations', () => {
       
       const report = profiler.generateReport();
       expect(report.operationCount).toBe(0);
+    });
+
+    it('should track memory usage during API calls', async () => {
+      const profiler = getPerformanceProfiler(true);
+      
+      // Mock process.memoryUsage for memory tracking
+      const originalMemoryUsage = process.memoryUsage;
+      const mockMemoryUsage = jest.fn()
+        .mockReturnValueOnce({
+          heapUsed: 1000000,
+          heapTotal: 2000000,
+          external: 100000,
+          rss: 3000000,
+          arrayBuffers: 50000,
+        })
+        .mockReturnValueOnce({
+          heapUsed: 1500000, // Increased by 500KB
+          heapTotal: 2000000,
+          external: 100000,
+          rss: 3000000,
+          arrayBuffers: 50000,
+        });
+      
+      // Replace the global process.memoryUsage
+      (global as any).process = {
+        ...process,
+        memoryUsage: mockMemoryUsage,
+      };
+      
+      mockPerformanceNow
+        .mockReturnValueOnce(1000)
+        .mockReturnValueOnce(1100);
+      
+      const result = await profiler.profileApiCall('memory-test', async () => {
+        return 'test-result';
+      });
+      
+      expect(result).toBe('test-result');
+      
+      // Restore original function
+      (global as any).process = {
+        ...process,
+        memoryUsage: originalMemoryUsage,
+      };
+    });
+
+    it('should detect caching opportunities from repeated operations', async () => {
+      const profiler = getPerformanceProfiler(true);
+      
+      // Simulate repeated operations
+      for (let i = 0; i < 25; i++) {
+        mockPerformanceNow
+          .mockReturnValueOnce(1000 + i * 100)
+          .mockReturnValueOnce(1010 + i * 100);
+        
+        await profiler.profileFunction('repeated-computation', 'computation' as any, async () => {
+          return 'result';
+        });
+      }
+      
+      const report = profiler.generateReport();
+      
+      expect(report.recommendations).toContain(
+        expect.stringContaining('repeated frequently')
+      );
     });
   });
 

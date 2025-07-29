@@ -215,12 +215,26 @@ export class CacheManager {
   }
 
   /**
-   * Cache trigger evaluation result
+   * Cache trigger evaluation result with intelligent TTL
    */
   cacheTriggerEvaluation(trigger: string, context: any, result: any): void {
     const key = `trigger_eval_${trigger}_${this.hashContext(context)}`;
-    // Trigger evaluations are context-specific, shorter TTL
-    this.set(key, result, 30 * 1000); // 30 seconds
+    
+    // Adjust TTL based on result confidence and trigger type
+    let ttl = 30 * 1000; // Default 30 seconds
+    
+    if (result.confidence > 0.8) {
+      ttl = 60 * 1000; // High confidence results cache longer
+    } else if (result.confidence < 0.3) {
+      ttl = 10 * 1000; // Low confidence results cache shorter
+    }
+    
+    // Critical triggers cache shorter to ensure responsiveness
+    if (trigger === 'milestone_achieved' || trigger === 'goal_completed') {
+      ttl = Math.min(ttl, 15 * 1000);
+    }
+    
+    this.set(key, result, ttl);
   }
 
   /**
@@ -236,9 +250,20 @@ export class CacheManager {
   // ============================================================================
 
   /**
-   * Set multiple cache entries at once
+   * Set multiple cache entries at once with optimized batch processing
    */
   setBatch(entries: Array<{ key: string; data: any; ttl?: number }>): void {
+    // Check if we need to evict entries before batch operation
+    const newEntriesCount = entries.filter(({ key }) => !this.cache.has(key)).length;
+    const availableSpace = this.config.maxSize - this.cache.size;
+    
+    if (newEntriesCount > availableSpace) {
+      // Evict multiple entries at once for better performance
+      const evictCount = newEntriesCount - availableSpace;
+      this.evictMultiple(evictCount);
+    }
+
+    // Batch set operations
     entries.forEach(({ key, data, ttl }) => {
       this.set(key, data, ttl);
     });
@@ -388,20 +413,25 @@ export class CacheManager {
    * Evict least recently used entry
    */
   private evictLeastRecentlyUsed(): void {
-    let oldestKey: string | null = null;
-    let oldestTime = Date.now();
+    this.evictMultiple(1);
+  }
 
-    this.cache.forEach((entry, key) => {
-      if (entry.lastAccessed.getTime() < oldestTime) {
-        oldestTime = entry.lastAccessed.getTime();
-        oldestKey = key;
-      }
-    });
+  /**
+   * Evict multiple least recently used entries for better batch performance
+   */
+  private evictMultiple(count: number): void {
+    if (count <= 0 || this.cache.size === 0) return;
 
-    if (oldestKey) {
-      this.cache.delete(oldestKey);
+    // Convert to array and sort by last accessed time
+    const entries = Array.from(this.cache.entries());
+    entries.sort(([, a], [, b]) => a.lastAccessed.getTime() - b.lastAccessed.getTime());
+
+    // Remove the oldest entries
+    const toEvict = entries.slice(0, Math.min(count, entries.length));
+    toEvict.forEach(([key]) => {
+      this.cache.delete(key);
       this.stats.evictions++;
-    }
+    });
   }
 
   /**

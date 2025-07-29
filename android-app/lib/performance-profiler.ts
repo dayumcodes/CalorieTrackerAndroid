@@ -59,11 +59,12 @@ export class PerformanceProfiler {
   private isEnabled = false;
   private maxMetricsHistory = 1000;
   private maxMemorySnapshots = 100;
-  private memoryMonitorInterval: NodeJS.Timeout | null = null;
+  private memoryMonitorInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(enabled = false) {
     this.isEnabled = enabled;
-    if (enabled) {
+    // Only start memory monitoring if enabled and not in test environment
+    if (enabled && typeof process !== 'undefined' && process.env?.NODE_ENV !== 'test') {
       this.startMemoryMonitoring();
     }
   }
@@ -130,7 +131,7 @@ export class PerformanceProfiler {
     }
 
     this.startProfiling(name, category, metadata);
-    
+
     try {
       const result = await fn();
       return result;
@@ -152,15 +153,27 @@ export class PerformanceProfiler {
   }
 
   /**
-   * Profile API calls
+   * Profile API calls with enhanced monitoring
    */
   async profileApiCall<T>(endpoint: string, fn: () => Promise<T>): Promise<T> {
-    return this.profileFunction(
+    const startMemory = this.takeMemorySnapshot();
+
+    const result = await this.profileFunction(
       `api_${endpoint}`,
       PerformanceCategory.API,
       fn,
-      { endpoint }
+      { endpoint, startMemory: startMemory.heapUsed }
     );
+
+    const endMemory = this.takeMemorySnapshot();
+    const memoryDelta = endMemory.heapUsed - startMemory.heapUsed;
+
+    // Log significant memory usage
+    if (memoryDelta > 1024 * 1024) { // 1MB
+      console.warn(`API call ${endpoint} used ${Math.round(memoryDelta / 1024 / 1024)}MB memory`);
+    }
+
+    return result;
   }
 
   /**
@@ -183,19 +196,34 @@ export class PerformanceProfiler {
    * Take a memory snapshot
    */
   takeMemorySnapshot(): MemorySnapshot {
-    const memoryUsage = process.memoryUsage();
-    
+    let memoryUsage;
+    try {
+      memoryUsage = process.memoryUsage();
+      if (!memoryUsage) {
+        throw new Error('memoryUsage is null');
+      }
+    } catch (error) {
+      // Fallback for environments where process.memoryUsage is not available
+      memoryUsage = {
+        heapUsed: 0,
+        heapTotal: 0,
+        external: 0,
+        rss: 0,
+        arrayBuffers: 0,
+      };
+    }
+
     const snapshot: MemorySnapshot = {
       timestamp: new Date(),
-      heapUsed: memoryUsage.heapUsed,
-      heapTotal: memoryUsage.heapTotal,
-      external: memoryUsage.external,
-      rss: memoryUsage.rss,
+      heapUsed: memoryUsage.heapUsed || 0,
+      heapTotal: memoryUsage.heapTotal || 0,
+      external: memoryUsage.external || 0,
+      rss: memoryUsage.rss || 0,
     };
 
     if (this.isEnabled) {
       this.memorySnapshots.push(snapshot);
-      
+
       // Maintain history limit
       if (this.memorySnapshots.length > this.maxMemorySnapshots) {
         this.memorySnapshots = this.memorySnapshots.slice(-this.maxMemorySnapshots);
@@ -214,7 +242,7 @@ export class PerformanceProfiler {
     changeRate: number;
   } {
     const current = this.takeMemorySnapshot();
-    
+
     if (this.memorySnapshots.length < 2) {
       return {
         current,
@@ -226,9 +254,9 @@ export class PerformanceProfiler {
     const recent = this.memorySnapshots.slice(-10);
     const first = recent[0];
     const last = recent[recent.length - 1];
-    
+
     const changeRate = (last.heapUsed - first.heapUsed) / first.heapUsed;
-    
+
     let trend: 'increasing' | 'decreasing' | 'stable';
     if (changeRate > 0.1) {
       trend = 'increasing';
@@ -254,7 +282,7 @@ export class PerformanceProfiler {
    */
   generateReport(): PerformanceReport {
     const metrics = this.completedMetrics;
-    
+
     if (metrics.length === 0) {
       return {
         totalDuration: 0,
@@ -284,7 +312,7 @@ export class PerformanceProfiler {
     Object.values(PerformanceCategory).forEach(category => {
       const categoryMetrics = metrics.filter(m => m.category === category);
       const categoryTotal = categoryMetrics.reduce((sum, m) => sum + (m.duration || 0), 0);
-      
+
       categoryBreakdown[category] = {
         count: categoryMetrics.length,
         totalDuration: categoryTotal,
@@ -348,6 +376,35 @@ export class PerformanceProfiler {
       }
     });
 
+    // Check for optimization opportunities
+    const storageOps = metrics.filter(m => m.category === PerformanceCategory.STORAGE);
+    if (storageOps.length > 50) {
+      recommendations.push('High storage operation frequency detected. Consider implementing batch processing.');
+    }
+
+    // Check for memory efficiency
+    if (this.memorySnapshots.length > 10) {
+      const recentSnapshots = this.memorySnapshots.slice(-10);
+      const avgMemoryUsage = recentSnapshots.reduce((sum, s) => sum + s.heapUsed, 0) / recentSnapshots.length;
+
+      if (avgMemoryUsage > 50 * 1024 * 1024) { // 50MB
+        recommendations.push('High memory usage detected. Consider implementing memory optimization strategies.');
+      }
+    }
+
+    // Check for caching opportunities
+    const duplicateOperations = new Map<string, number>();
+    metrics.forEach(metric => {
+      const key = `${metric.category}_${metric.name}`;
+      duplicateOperations.set(key, (duplicateOperations.get(key) || 0) + 1);
+    });
+
+    duplicateOperations.forEach((count, operation) => {
+      if (count > 20) {
+        recommendations.push(`Operation "${operation}" is repeated frequently. Consider caching results.`);
+      }
+    });
+
     if (recommendations.length === 0) {
       recommendations.push('Performance looks good! No specific recommendations.');
     }
@@ -373,7 +430,7 @@ export class PerformanceProfiler {
     }>;
   } {
     const metrics = this.completedMetrics;
-    
+
     // Analyze operation frequency and duration
     const operationStats = new Map<string, {
       totalDuration: number;
@@ -387,7 +444,7 @@ export class PerformanceProfiler {
         count: 0,
         category: metric.category,
       };
-      
+
       existing.totalDuration += metric.duration || 0;
       existing.count += 1;
       operationStats.set(metric.name, existing);
@@ -415,7 +472,7 @@ export class PerformanceProfiler {
         totalDuration: 0,
         count: 0,
       };
-      
+
       existing.totalDuration += metric.duration || 0;
       existing.count += 1;
       categoryStats.set(metric.category, existing);
@@ -445,7 +502,7 @@ export class PerformanceProfiler {
    */
   setEnabled(enabled: boolean): void {
     this.isEnabled = enabled;
-    
+
     if (enabled) {
       this.startMemoryMonitoring();
     } else {
@@ -545,11 +602,11 @@ export function getPerformanceProfiler(enabled?: boolean): PerformanceProfiler {
   if (!performanceProfilerInstance) {
     performanceProfilerInstance = new PerformanceProfiler(enabled);
   }
-  
+
   if (enabled !== undefined) {
     performanceProfilerInstance.setEnabled(enabled);
   }
-  
+
   return performanceProfilerInstance;
 }
 

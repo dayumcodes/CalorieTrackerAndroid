@@ -300,21 +300,48 @@ export class BatchProcessor {
   }
 
   /**
-   * Process user metrics updates
+   * Process user metrics updates with intelligent merging
    */
   private async processMetricsUpdates(operations: BatchOperation[]): Promise<void> {
     if (operations.length === 0) return;
 
     try {
-      // Merge all metrics updates into a single update
+      // Intelligent merging - handle special cases
       const mergedUpdates: Partial<UserMetrics> = {};
+      let hasCounterUpdates = false;
+      let hasTimestampUpdates = false;
       
       operations.forEach(operation => {
-        Object.assign(mergedUpdates, operation.data);
+        const data = operation.data;
+        
+        // Handle counter fields (sum them up)
+        if ('appOpenCount' in data || 'successfulFoodLogs' in data) {
+          hasCounterUpdates = true;
+          mergedUpdates.appOpenCount = (mergedUpdates.appOpenCount || 0) + (data.appOpenCount || 0);
+          mergedUpdates.successfulFoodLogs = (mergedUpdates.successfulFoodLogs || 0) + (data.successfulFoodLogs || 0);
+        }
+        
+        // Handle timestamp fields (use latest)
+        if ('lastReviewPrompt' in data || 'lastAppOpen' in data) {
+          hasTimestampUpdates = true;
+          if (data.lastReviewPrompt && (!mergedUpdates.lastReviewPrompt || data.lastReviewPrompt > mergedUpdates.lastReviewPrompt)) {
+            mergedUpdates.lastReviewPrompt = data.lastReviewPrompt;
+          }
+          if (data.lastAppOpen && (!mergedUpdates.lastAppOpen || data.lastAppOpen > mergedUpdates.lastAppOpen)) {
+            mergedUpdates.lastAppOpen = data.lastAppOpen;
+          }
+        }
+        
+        // Handle other fields (overwrite)
+        Object.keys(data).forEach(key => {
+          if (!['appOpenCount', 'successfulFoodLogs', 'lastReviewPrompt', 'lastAppOpen'].includes(key)) {
+            mergedUpdates[key as keyof UserMetrics] = data[key];
+          }
+        });
       });
 
-      // Use require to avoid dynamic import issues in tests
-      const storageService = require('./storage-service').storageService;
+      // Use require for better test compatibility
+      const { storageService } = require('./storage-service');
       await storageService.updateUserMetrics(mergedUpdates);
 
       this.stats.operationsProcessed += operations.length;
@@ -324,21 +351,24 @@ export class BatchProcessor {
   }
 
   /**
-   * Process review settings updates
+   * Process review settings updates with conflict resolution
    */
   private async processSettingsUpdates(operations: BatchOperation[]): Promise<void> {
     if (operations.length === 0) return;
 
     try {
-      // Merge all settings updates into a single update
+      // Sort operations by timestamp to handle conflicts properly
+      const sortedOps = operations.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      
+      // Merge settings with last-write-wins for conflicts
       const mergedUpdates: Partial<ReviewSettings> = {};
       
-      operations.forEach(operation => {
+      sortedOps.forEach(operation => {
         Object.assign(mergedUpdates, operation.data);
       });
 
-      // Use require to avoid dynamic import issues in tests
-      const storageService = require('./storage-service').storageService;
+      // Use require for better test compatibility
+      const { storageService } = require('./storage-service');
       await storageService.updateReviewSettings(mergedUpdates);
 
       this.stats.operationsProcessed += operations.length;
@@ -348,23 +378,71 @@ export class BatchProcessor {
   }
 
   /**
-   * Process user actions
+   * Process user actions with optimized batch handling
    */
   private async processUserActions(operations: BatchOperation[]): Promise<void> {
     if (operations.length === 0) return;
 
     try {
-      // Use require to avoid dynamic import issues in tests
-      const triggerEngine = require('./trigger-engine').triggerEngine;
+      // Use require for better test compatibility
+      const { getLazyLoader } = require('./lazy-loader');
+      const lazyLoader = getLazyLoader();
+      const triggerEngine = await lazyLoader.getTriggerEngine();
       
-      // Process each user action
-      for (const operation of operations) {
-        await triggerEngine.updateUserMetrics(operation.data);
+      // Group similar actions for batch processing
+      const actionGroups = new Map<string, UserAction[]>();
+      
+      operations.forEach(operation => {
+        const actionType = operation.data.type;
+        if (!actionGroups.has(actionType)) {
+          actionGroups.set(actionType, []);
+        }
+        actionGroups.get(actionType)!.push(operation.data);
+      });
+
+      // Process each group
+      for (const [actionType, actions] of actionGroups) {
+        if (actions.length === 1) {
+          // Single action - process normally
+          await triggerEngine.updateUserMetrics(actions[0]);
+        } else {
+          // Multiple similar actions - batch process if possible
+          await this.processBatchedUserActions(triggerEngine, actions);
+        }
       }
 
       this.stats.operationsProcessed += operations.length;
     } catch (error) {
       await this.handleOperationErrors(operations, error);
+    }
+  }
+
+  /**
+   * Process batched user actions of the same type
+   */
+  private async processBatchedUserActions(triggerEngine: any, actions: UserAction[]): Promise<void> {
+    // For actions that can be batched (like app_open), aggregate them
+    if (actions[0].type === 'app_open') {
+      // Create a single aggregated action
+      const aggregatedAction: UserAction = {
+        type: 'app_open',
+        timestamp: actions[actions.length - 1].timestamp, // Use latest timestamp
+        metadata: {
+          ...actions[actions.length - 1].metadata,
+          batchCount: actions.length,
+          timeRange: {
+            start: actions[0].timestamp,
+            end: actions[actions.length - 1].timestamp,
+          },
+        },
+      };
+      
+      await triggerEngine.updateUserMetrics(aggregatedAction);
+    } else {
+      // For other actions, process individually
+      for (const action of actions) {
+        await triggerEngine.updateUserMetrics(action);
+      }
     }
   }
 

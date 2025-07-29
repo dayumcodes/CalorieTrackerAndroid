@@ -62,11 +62,15 @@ export class LazyLoader {
    */
   async getReviewManager(options: LazyLoadOptions = {}): Promise<ReviewManager> {
     return this.loadComponent('reviewManager', async () => {
-      // Use require for better test compatibility
-      const { ReviewManager } = require('./review-manager');
-      const instance = new ReviewManager();
-      await instance.initialize();
-      return instance;
+      // Use require for better test compatibility, but still lazy load
+      const { reviewManager } = require('./review-manager');
+      
+      // Initialize only if not already initialized
+      if (!(reviewManager as any).isInitialized) {
+        await reviewManager.initialize();
+      }
+      
+      return reviewManager;
     }, options);
   }
 
@@ -75,11 +79,15 @@ export class LazyLoader {
    */
   async getTriggerEngine(options: LazyLoadOptions = {}): Promise<ReviewTriggerEngine> {
     return this.loadComponent('triggerEngine', async () => {
-      // Use require for better test compatibility
-      const { ReviewTriggerEngine } = require('./trigger-engine');
-      const instance = new ReviewTriggerEngine();
-      await instance.initialize();
-      return instance;
+      // Use require for better test compatibility, but still lazy load
+      const { triggerEngine } = require('./trigger-engine');
+      
+      // Initialize only if not already initialized
+      if (!(triggerEngine as any).isInitialized) {
+        await triggerEngine.initialize();
+      }
+      
+      return triggerEngine;
     }, options);
   }
 
@@ -88,11 +96,15 @@ export class LazyLoader {
    */
   async getStorageService(options: LazyLoadOptions = {}): Promise<AsyncStorageService> {
     return this.loadComponent('storageService', async () => {
-      // Use require for better test compatibility
-      const { AsyncStorageService } = require('./storage-service');
-      const instance = new AsyncStorageService();
-      await instance.initialize();
-      return instance;
+      // Use require for better test compatibility, but still lazy load
+      const { storageService } = require('./storage-service');
+      
+      // Initialize only if not already initialized
+      if (!(storageService as any).isInitialized) {
+        await storageService.initialize();
+      }
+      
+      return storageService;
     }, options);
   }
 
@@ -101,9 +113,9 @@ export class LazyLoader {
    */
   async getAnalyticsTracker(options: LazyLoadOptions = {}): Promise<AnalyticsTracker> {
     return this.loadComponent('analyticsTracker', async () => {
-      // Use require for better test compatibility
-      const { AnalyticsTracker } = require('./analytics-tracker');
-      return new AnalyticsTracker();
+      // Use require for better test compatibility, but still lazy load
+      const { getAnalyticsTracker } = require('./analytics-tracker');
+      return getAnalyticsTracker();
     }, options);
   }
 
@@ -201,18 +213,75 @@ export class LazyLoader {
   }
 
   /**
-   * Perform the actual preloading
+   * Smart preloading based on usage patterns
+   */
+  async smartPreload(usageHints: {
+    likelyToTriggerReview?: boolean;
+    frequentStorageAccess?: boolean;
+    analyticsEnabled?: boolean;
+  } = {}): Promise<void> {
+    const { 
+      likelyToTriggerReview = false, 
+      frequentStorageAccess = true, 
+      analyticsEnabled = true 
+    } = usageHints;
+
+    const preloadTasks: Promise<any>[] = [];
+
+    // Always preload storage service for frequent access
+    if (frequentStorageAccess) {
+      preloadTasks.push(this.getStorageService({ preload: true, timeout: 3000 }));
+    }
+
+    // Preload analytics if enabled
+    if (analyticsEnabled) {
+      preloadTasks.push(this.getAnalyticsTracker({ preload: true, timeout: 2000 }));
+    }
+
+    // Preload review components if likely to be used
+    if (likelyToTriggerReview) {
+      preloadTasks.push(
+        this.getTriggerEngine({ preload: true, timeout: 5000 }),
+        this.getReviewManager({ preload: true, timeout: 7000 })
+      );
+    }
+
+    try {
+      await Promise.allSettled(preloadTasks);
+    } catch (error) {
+      console.warn('LazyLoader: Smart preload failed:', error);
+    }
+  }
+
+  /**
+   * Perform the actual preloading with intelligent prioritization
    */
   private async performPreload(): Promise<void> {
-    const preloadTasks = [
-      this.getStorageService({ preload: true }),
-      this.getAnalyticsTracker({ preload: true }),
-      this.getTriggerEngine({ preload: true }),
-      this.getReviewManager({ preload: true }),
+    // Preload in order of importance and dependency
+    const preloadStages = [
+      // Stage 1: Core dependencies (most critical)
+      [
+        this.getStorageService({ preload: true, timeout: 5000 }),
+        this.getAnalyticsTracker({ preload: true, timeout: 3000 }),
+      ],
+      // Stage 2: Business logic (depends on core)
+      [
+        this.getTriggerEngine({ preload: true, timeout: 7000 }),
+      ],
+      // Stage 3: Orchestration (depends on everything)
+      [
+        this.getReviewManager({ preload: true, timeout: 10000 }),
+      ],
     ];
 
     try {
-      await Promise.all(preloadTasks);
+      // Load each stage sequentially for better dependency management
+      for (const stage of preloadStages) {
+        await Promise.allSettled(stage);
+        
+        // Small delay between stages to prevent overwhelming the system
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
     } catch (error) {
       console.warn('LazyLoader: Some components failed to preload:', error);
       // Don't throw - preloading is optional
