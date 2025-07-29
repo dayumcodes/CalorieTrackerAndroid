@@ -19,7 +19,7 @@ import {
 import { getAnalyticsTracker } from './analytics-tracker';
 import { errorHandler } from './error-handler';
 import { getLazyLoader } from './lazy-loader';
-import { getPerformanceProfiler } from './performance-profiler';
+import { getPerformanceProfiler, PerformanceCategory } from './performance-profiler';
 
 /**
  * Configuration for ReviewManager
@@ -66,7 +66,7 @@ export class ReviewManager implements IReviewManager {
             return;
         }
 
-        return this.profiler.profileFunction('reviewManager_initialize', 'computation', async () => {
+        return this.profiler.profileFunction('reviewManager_initialize', PerformanceCategory.COMPUTATION, async () => {
             try {
                 if (this.config.debugMode) {
                     console.log('ReviewManager: Initializing...');
@@ -211,33 +211,33 @@ export class ReviewManager implements IReviewManager {
         return this.profiler.profileApiCall('isReviewAvailable', async () => {
             try {
                 await this.ensureInitialized();
-                
+
                 // Try to get from cache first
                 const storageService = await this.lazyLoader.getStorageService();
                 const cacheManager = (storageService as any).cacheManager;
                 const cached = cacheManager?.getCachedReviewAvailability();
-                
+
                 if (cached !== null) {
                     return cached;
                 }
-                
+
                 // Load review dialog lazily
                 const { reviewDialog } = await import('./review-dialog');
                 const startTime = Date.now();
                 const isAvailable = await reviewDialog.isAvailable();
                 const responseTime = Date.now() - startTime;
-                
+
                 // Cache the result
                 if (cacheManager) {
                     cacheManager.cacheReviewAvailability(isAvailable);
                 }
-                
+
                 this.analyticsTracker.trackApiCall('isAvailable', responseTime, true);
                 return isAvailable;
             } catch (error) {
                 const responseTime = Date.now();
                 this.analyticsTracker.trackApiCall('isAvailable', responseTime, false, String(error));
-                
+
                 if (this.config.debugMode) {
                     console.error('ReviewManager: Error checking review availability:', error);
                 }
@@ -249,7 +249,7 @@ export class ReviewManager implements IReviewManager {
     /**
      * Reset review state (for testing purposes)
      */
-    resetReviewState(): void {
+    async resetReviewState(): Promise<void> {
         if (this.config.debugMode) {
             console.log('ReviewManager: Resetting review state');
         }
@@ -296,7 +296,7 @@ export class ReviewManager implements IReviewManager {
      * Process a user action asynchronously
      */
     private async processUserAction(action: UserAction): Promise<void> {
-        return this.profiler.profileFunction('processUserAction', 'computation', async () => {
+        return this.profiler.profileFunction('processUserAction', PerformanceCategory.COMPUTATION, async () => {
             try {
                 if (this.config.debugMode) {
                     console.log('ReviewManager: Processing user action', {
@@ -321,7 +321,7 @@ export class ReviewManager implements IReviewManager {
             } catch (error) {
                 const operationTime = Date.now();
                 this.analyticsTracker.trackStorageOperation('updateUserMetrics', operationTime, false, String(error));
-                
+
                 const reviewError = this.createError(
                     ReviewErrorType.UNKNOWN_ERROR,
                     'Failed to process user action',
@@ -383,7 +383,7 @@ export class ReviewManager implements IReviewManager {
         } catch (error) {
             const responseTime = Date.now();
             this.analyticsTracker.trackApiCall('requestReview', responseTime, false, String(error));
-            
+
             // Create review error
             const reviewError = this.createError(
                 ReviewErrorType.UNKNOWN_ERROR,
@@ -394,7 +394,7 @@ export class ReviewManager implements IReviewManager {
 
             // Use error handler for recovery
             const recoveryResult = await errorHandler.handleReviewError(reviewError, context);
-            
+
             return {
                 success: recoveryResult.success,
                 action: recoveryResult.action,
@@ -544,7 +544,7 @@ export class ReviewManager implements IReviewManager {
      */
     updateConfig(newConfig: Partial<ReviewManagerConfig>): void {
         this.config = { ...this.config, ...newConfig };
-        
+
         // Update analytics tracker debug mode if changed
         if (newConfig.debugMode !== undefined) {
             this.analyticsTracker.setDebugMode(newConfig.debugMode);

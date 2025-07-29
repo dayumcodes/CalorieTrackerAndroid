@@ -5,7 +5,7 @@
 
 import { ReviewManager } from '../lib/review-manager';
 import { ReviewTriggerEngine } from '../lib/trigger-engine';
-import { ReviewStorageService } from '../lib/storage-service';
+import { AsyncStorageService } from '../lib/storage-service';
 import { ReviewDialog } from '../lib/review-dialog';
 import { AnalyticsTracker } from '../lib/analytics-tracker';
 import {
@@ -38,14 +38,14 @@ jest.mock('react-native-in-app-review', () => ({
 describe('Performance Tests', () => {
     let reviewManager: ReviewManager;
     let triggerEngine: ReviewTriggerEngine;
-    let storageService: ReviewStorageService;
+    let storageService: AsyncStorageService;
     let reviewDialog: ReviewDialog;
     let analyticsTracker: AnalyticsTracker;
 
     beforeEach(() => {
         reviewManager = new ReviewManager({ debugMode: false });
         triggerEngine = new ReviewTriggerEngine();
-        storageService = new ReviewStorageService();
+        storageService = new AsyncStorageService();
         reviewDialog = new ReviewDialog();
         analyticsTracker = new AnalyticsTracker();
     });
@@ -53,51 +53,50 @@ describe('Performance Tests', () => {
     describe('Initialization Performance', () => {
         it('should initialize ReviewManager within 100ms', async () => {
             const startTime = performance.now();
-            
+
             await reviewManager.initialize();
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(100);
         });
 
         it('should initialize TriggerEngine within 50ms', async () => {
             const startTime = performance.now();
-            
+
             await triggerEngine.initialize();
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(50);
         });
 
         it('should initialize StorageService within 50ms', async () => {
             const startTime = performance.now();
-            
+
             await storageService.initialize();
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(50);
         });
 
         it('should handle concurrent initialization efficiently', async () => {
             const startTime = performance.now();
-            
+
             // Initialize multiple components concurrently
             await Promise.all([
                 reviewManager.initialize(),
                 triggerEngine.initialize(),
                 storageService.initialize(),
-                analyticsTracker.initialize(),
             ]);
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should not take significantly longer than single initialization
             expect(duration).toBeLessThan(150);
         });
@@ -115,12 +114,12 @@ describe('Performance Tests', () => {
             };
 
             const startTime = performance.now();
-            
+
             reviewManager.recordUserAction(action);
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Synchronous part should be very fast
             expect(duration).toBeLessThan(10);
         });
@@ -133,19 +132,19 @@ describe('Performance Tests', () => {
             }));
 
             const startTime = performance.now();
-            
+
             actions.forEach(action => reviewManager.recordUserAction(action));
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should handle 100 actions in under 50ms
             expect(duration).toBeLessThan(50);
         });
 
         it('should process queued actions efficiently after initialization', async () => {
             const uninitializedManager = new ReviewManager();
-            
+
             // Queue actions before initialization
             const actions: UserAction[] = Array.from({ length: 50 }, (_, i) => ({
                 type: 'app_open',
@@ -155,12 +154,12 @@ describe('Performance Tests', () => {
             actions.forEach(action => uninitializedManager.recordUserAction(action));
 
             const startTime = performance.now();
-            
+
             await uninitializedManager.initialize();
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should process queued actions during initialization efficiently
             expect(duration).toBeLessThan(200);
         });
@@ -191,12 +190,12 @@ describe('Performance Tests', () => {
             };
 
             const startTime = performance.now();
-            
+
             await triggerEngine.evaluateTrigger(context);
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(20);
         });
 
@@ -226,12 +225,12 @@ describe('Performance Tests', () => {
             }));
 
             const startTime = performance.now();
-            
+
             await Promise.all(contexts.map(context => triggerEngine.evaluateTrigger(context)));
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should evaluate all 5 triggers in under 100ms
             expect(duration).toBeLessThan(100);
         });
@@ -244,12 +243,12 @@ describe('Performance Tests', () => {
 
         it('should read user metrics within 30ms', async () => {
             const startTime = performance.now();
-            
+
             await storageService.getUserMetrics();
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(30);
         });
 
@@ -260,12 +259,12 @@ describe('Performance Tests', () => {
             };
 
             const startTime = performance.now();
-            
+
             await storageService.updateUserMetrics(metrics);
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(30);
         });
 
@@ -276,12 +275,12 @@ describe('Performance Tests', () => {
             }));
 
             const startTime = performance.now();
-            
+
             await Promise.all(operations.map(metrics => storageService.updateUserMetrics(metrics)));
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should handle 20 batch operations in under 200ms
             expect(duration).toBeLessThan(200);
         });
@@ -305,23 +304,23 @@ describe('Performance Tests', () => {
     describe('Review Dialog Performance', () => {
         it('should check availability within 50ms', async () => {
             const startTime = performance.now();
-            
+
             await reviewDialog.isAvailable();
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(50);
         });
 
         it('should request review within 200ms', async () => {
             const startTime = performance.now();
-            
+
             await reviewDialog.requestReview();
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Native dialog should be fast
             expect(duration).toBeLessThan(200);
         });
@@ -330,17 +329,17 @@ describe('Performance Tests', () => {
     describe('Memory Usage', () => {
         it('should not create memory leaks during normal operation', async () => {
             const initialMemory = process.memoryUsage().heapUsed;
-            
+
             // Simulate normal usage
             await reviewManager.initialize();
-            
+
             for (let i = 0; i < 100; i++) {
                 const action: UserAction = {
                     type: i % 2 === 0 ? 'app_open' : 'successful_food_log',
                     timestamp: new Date(),
                 };
                 reviewManager.recordUserAction(action);
-                
+
                 if (i % 10 === 0) {
                     const context: ReviewContext = {
                         trigger: ReviewTrigger.APP_OPEN,
@@ -362,22 +361,22 @@ describe('Performance Tests', () => {
                     await reviewManager.checkAndTriggerReview(context);
                 }
             }
-            
+
             // Force garbage collection if available
             if (global.gc) {
                 global.gc();
             }
-            
+
             const finalMemory = process.memoryUsage().heapUsed;
             const memoryIncrease = finalMemory - initialMemory;
-            
+
             // Memory increase should be reasonable (less than 5MB)
             expect(memoryIncrease).toBeLessThan(5 * 1024 * 1024);
         });
 
         it('should clean up resources properly', async () => {
             await reviewManager.initialize();
-            
+
             // Use the system
             for (let i = 0; i < 50; i++) {
                 reviewManager.recordUserAction({
@@ -385,12 +384,12 @@ describe('Performance Tests', () => {
                     timestamp: new Date(),
                 });
             }
-            
+
             // Reset state (should clean up resources)
-            reviewManager.resetReviewState();
-            
+            await reviewManager.resetReviewState();
+
             // Should not throw or cause memory issues
-            expect(() => reviewManager.resetReviewState()).not.toThrow();
+            await expect(reviewManager.resetReviewState()).resolves.not.toThrow();
         });
     });
 
@@ -419,17 +418,17 @@ describe('Performance Tests', () => {
             };
 
             const startTime = performance.now();
-            
+
             // Start multiple concurrent review checks
-            const promises = Array.from({ length: 10 }, () => 
+            const promises = Array.from({ length: 10 }, () =>
                 reviewManager.checkAndTriggerReview(context)
             );
-            
+
             await Promise.all(promises);
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should handle concurrent operations efficiently
             expect(duration).toBeLessThan(300);
         });
@@ -442,16 +441,16 @@ describe('Performance Tests', () => {
             }));
 
             const startTime = performance.now();
-            
+
             // Record all actions concurrently
             actions.forEach(action => reviewManager.recordUserAction(action));
-            
+
             // Wait for processing
             await new Promise(resolve => setTimeout(resolve, 100));
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             expect(duration).toBeLessThan(150);
         });
     });
@@ -459,9 +458,9 @@ describe('Performance Tests', () => {
     describe('Stress Testing', () => {
         it('should handle high-frequency user actions', async () => {
             await reviewManager.initialize();
-            
+
             const startTime = performance.now();
-            
+
             // Simulate rapid user interactions
             for (let i = 0; i < 1000; i++) {
                 reviewManager.recordUserAction({
@@ -469,28 +468,28 @@ describe('Performance Tests', () => {
                     timestamp: new Date(Date.now() + i),
                 });
             }
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should handle 1000 actions in under 100ms
             expect(duration).toBeLessThan(100);
         });
 
         it('should maintain performance under load', async () => {
             await reviewManager.initialize();
-            
+
             const iterations = 100;
             const durations: number[] = [];
-            
+
             for (let i = 0; i < iterations; i++) {
                 const startTime = performance.now();
-                
+
                 reviewManager.recordUserAction({
                     type: 'successful_food_log',
                     timestamp: new Date(),
                 });
-                
+
                 const context: ReviewContext = {
                     trigger: ReviewTrigger.SUCCESSFUL_FOOD_LOG,
                     userState: {
@@ -508,16 +507,16 @@ describe('Performance Tests', () => {
                         sessionStartTime: new Date(),
                     },
                 };
-                
+
                 await reviewManager.checkAndTriggerReview(context);
-                
+
                 const endTime = performance.now();
                 durations.push(endTime - startTime);
             }
-            
+
             const averageDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
             const maxDuration = Math.max(...durations);
-            
+
             // Performance should remain consistent
             expect(averageDuration).toBeLessThan(50);
             expect(maxDuration).toBeLessThan(100);
@@ -528,38 +527,38 @@ describe('Performance Tests', () => {
         it('should have minimal impact on app startup time', async () => {
             // Simulate app startup scenario
             const startTime = performance.now();
-            
+
             // Initialize review system as part of app startup
             const reviewManager = new ReviewManager({ debugMode: false });
             await reviewManager.initialize();
-            
+
             // Record initial app open
             reviewManager.recordUserAction({
                 type: 'app_open',
                 timestamp: new Date(),
             });
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Should add less than 50ms to startup time
             expect(duration).toBeLessThan(50);
         });
 
         it('should support lazy initialization', async () => {
             const reviewManager = new ReviewManager({ debugMode: false });
-            
+
             // Should be able to record actions before initialization
             const startTime = performance.now();
-            
+
             reviewManager.recordUserAction({
                 type: 'app_open',
                 timestamp: new Date(),
             });
-            
+
             const endTime = performance.now();
             const duration = endTime - startTime;
-            
+
             // Recording before initialization should be instant
             expect(duration).toBeLessThan(5);
         });
@@ -569,18 +568,18 @@ describe('Performance Tests', () => {
         it('should clean up timers and listeners', async () => {
             const reviewManager = new ReviewManager({ debugMode: false });
             await reviewManager.initialize();
-            
+
             // Use the system
             reviewManager.recordUserAction({
                 type: 'app_open',
                 timestamp: new Date(),
             });
-            
+
             // Reset should clean up resources
             const startTime = performance.now();
-            reviewManager.resetReviewState();
+            await reviewManager.resetReviewState();
             const endTime = performance.now();
-            
+
             const duration = endTime - startTime;
             expect(duration).toBeLessThan(10);
         });

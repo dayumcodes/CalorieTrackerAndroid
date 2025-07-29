@@ -175,7 +175,7 @@ export interface ReviewManager {
   checkAndTriggerReview(context: ReviewContext): Promise<boolean>;
   recordUserAction(action: UserAction): void;
   isReviewAvailable(): Promise<boolean>;
-  resetReviewState(): void; // For testing
+  resetReviewState(): Promise<void>; // For testing
 }
 
 /**

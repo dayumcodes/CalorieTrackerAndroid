@@ -192,7 +192,7 @@ function validateTypes(): void {
     async isReviewAvailable(): Promise<boolean> {
       return true;
     },
-    resetReviewState(): void {
+    async resetReviewState(): Promise<void> {
       // Mock implementation
     },
   };

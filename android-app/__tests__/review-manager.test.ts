@@ -358,7 +358,7 @@ describe('ReviewManager', () => {
             // Mock the clearReviewData method
             mockStorageService.clearReviewData.mockResolvedValue();
 
-            reviewManager.resetReviewState();
+            await reviewManager.resetReviewState();
 
             expect(mockStorageService.clearReviewData).toHaveBeenCalledTimes(1);
             expect(mockStorageService.clearCache).toHaveBeenCalledTimes(1);
@@ -373,7 +373,7 @@ describe('ReviewManager', () => {
             });
 
             // Should not throw
-            expect(() => reviewManager.resetReviewState()).not.toThrow();
+            await expect(reviewManager.resetReviewState()).resolves.not.toThrow();
         });
     });
 

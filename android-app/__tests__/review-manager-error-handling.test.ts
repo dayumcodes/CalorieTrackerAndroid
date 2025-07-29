@@ -318,17 +318,17 @@ describe('ReviewManager Error Handling', () => {
     });
 
     describe('State Reset Error Handling', () => {
-        it('should handle storage clearing errors gracefully', () => {
+        it('should handle storage clearing errors gracefully', async () => {
             const error = new Error('Clear data failed');
             mockStorageService.clearReviewData.mockImplementation(() => {
                 throw error;
             });
 
-            expect(() => reviewManager.resetReviewState()).not.toThrow();
+            await expect(reviewManager.resetReviewState()).resolves.not.toThrow();
         });
 
-        it('should clear all caches and pending actions', () => {
-            reviewManager.resetReviewState();
+        it('should clear all caches and pending actions', async () => {
+            await reviewManager.resetReviewState();
 
             expect(mockStorageService.clearCache).toHaveBeenCalled();
             expect(mockTriggerEngine.clearCache).toHaveBeenCalled();
@@ -492,7 +492,7 @@ describe('ReviewManager Error Handling', () => {
 
             expect(result).toBe(false);
             expect(available).toBe(false);
-            expect(() => reviewManager.resetReviewState()).not.toThrow();
+            await expect(reviewManager.resetReviewState()).resolves.not.toThrow();
         });
     });
 });

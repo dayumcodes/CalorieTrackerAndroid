@@ -37,7 +37,7 @@ interface MemorySnapshot {
   rss: number;
 }
 
-enum PerformanceCategory {
+export enum PerformanceCategory {
   STORAGE = 'storage',
   API = 'api',
   COMPUTATION = 'computation',
